@@ -1,0 +1,157 @@
+Title: Legacy code strikes again
+Topic: Context::Singleton
+Author: Branislav Zahradník <barney@cpan.org>
+
+=encoding utf8
+
+=head1 Improving legacy code
+
+3 o'clock. Our poor programmer sleeps dreaming hopeless dreams (having family once)
+
+ding ding, ding ding
+
+"Our databases are stuck again, we are not delivering, do something with it"
+
+=head2 Problem
+
+After quick look into production our programmer-soon-hero-again discovered that
+database servers are overloaded with unused connections.
+
+=head2 Code architecture
+
+For every gift you have
+
+=over
+
+=item delivery queue database
+
+=item accounting department database
+
+=item legal department database
+
+=item compliance database
+
+=back
+
+Location of every database for every gift's delivery region is located in central
+key-value storage (at least that one has no problem at all)
+
+Every gift processing opens all 4 connections (same even more) first it enters
+workflow and passes all of them into processing functions
+(they may needed them some times).
+
+=head2 Refactoring
+
+Solution is "easy".
+
+Do lazy connections.
+
+=head3 Naive solution
+
+Connect when needed.
+
+   sub foo {
+       my $delivery_queue_db = delivery_queue_connect( @_ );
+   }
+
+   sub bar {
+       if (my $delivery_queue_db = delivery_queue_connect( @_ )) {
+       }
+   }
+
+
+Unfortunately that makes it even worse.
+Same connection is required by many independent parts.
+
+=head3 OOP refactoring
+
+Tremendous amount of work, expected delivery 2200 - OOP noop.
+
+=head3 Legacy solution
+
+Use global variables localized per gift processing
+
+   our ($delivery_queue_db, $accounting_db, ...);
+
+   sub handle_gift {
+       our ($delivery_queue_db, $accounting_db, ...);
+   }
+
+   sub foo {
+       $delivery_queue_db //= delivery_queue_connect( @_ );
+   }
+
+Better ... but still lot of code to maintain, and we have well over 100 such parameters.
+
+And now we have to extend every function with connectivity information.
+
+Or make it another global variable.
+
+Trembling between 100 variables, 10_000 functions and who knows how many lines of code
+our programmer suddenly hears something to whisper.
+
+... "use me, search me, use me, search me"
+
+Is it you, Almighty CPAN? Do you have solution for me?
+
+"take a look at Context::Singleton"
+
+=head3 Curiosity driven development solution
+
+   contrive 'delivery_queue_db' => (
+       dep => qw[ gift ... ],
+       as => sub { my ($gift, ...) = @_; ... },
+   );
+
+   sub foo {
+       my $delivery_queue_db = deduce 'delivery_queue_db';
+   }
+
+   sub bar {
+       if (try_deduce 'delivery_queue_db') {
+           my $delivery_queue_db = deduce 'delivery_queue_db';
+       }
+   }
+
+   sub handle_gift {
+       frame {
+           proclaim 'gift' => $gift;
+
+           ...;
+       }
+   }
+
+Removing 4 arguments from every important function - largest code reducing commit
+in project history.
+
+Connection is created first time it is needed and persisted till end of frame.
+Our system works again, gifts are being delivered.
+
+This approach even allowed long expected optimization (not implemented due argument hell)
+so most likely system will handle even next Christmas load ...
+
+=head1 How it works?
+
+L<Context::Singleton> provides data control mechanism similar to code blocks
+but independent on code architecture.
+
+It provides reasonable caching as well - derived properties are stored
+in same C<frame> as their requirements.
+
+In our case, C<delivery_queue_db> will always be populated in same frame as
+C<gift> value was set.
+
+It provides you multiple ways how to populate variables based on availability
+of other variables.
+
+It is able to handle cyclic dependencies as well.
+
+It acts like C<$_> providing "default object" where every deducible property acts like
+method (with some kind of multi-dispatch) though you can compose specific classes as you
+need using / providing different C<contrive> recipes.
+
+See
+L<TPC in Amsterdam presentation|https://www.youtube.com/watch?v=KBQ0prTu5ys>
+(L<slides|https://rawgit.com/happy-barney/slides/master/2017-08-09%20-%20TPCiA%20-%20Context%20Singleton/src/tpcia-2017-08-09-context-singleton.html>)
+for more.
+
