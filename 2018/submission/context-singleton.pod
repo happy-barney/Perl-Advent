@@ -99,7 +99,7 @@ Is it you, Almighty CPAN? Do you have solution for me?
 =head3 Curiosity driven development solution
 
    contrive 'delivery_queue_db' => (
-       dep => qw[ gift ... ],
+       dep => [qw[ gift ... ]],
        as => sub { my ($gift, ...) = @_; ... },
    );
 
